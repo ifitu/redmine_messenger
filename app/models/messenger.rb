@@ -33,27 +33,29 @@ class Messenger
       url ||= RedmineMessenger.settings[:messenger_url]
       return if url.blank? || channels.blank?
 
-      params = { text: msg, link_names: 1 }
-      username = textfield_for_project options[:project], :messenger_username
-      params[:username] = username if username.present?
-      params[:attachments] = options[:attachment]&.any? ? [options[:attachment]] : []
-      icon = textfield_for_project options[:project], :messenger_icon
-      if icon.present?
-        if icon.start_with? ':'
-          params[:icon_emoji] = icon
-        else
-          params[:icon_url] = icon
-        end
+      msg += "\n\n" + (options[:attachment]&.has_key?(:text) ?  options[:attachment][:text] : '')
+      if options[:attachment]&.has_key?(:fields)
+        options[:attachment][:fields].map { |f| msg += "\n\n" +
+                                            f[:title] + ": " + f[:value]
+        }
       end
+      params = {
+                  msgtype: 'markdown',
+                  markdown: {
+                              title: 'Redmine Notification',
+                              text: msg
+                            }
+               }
 
       channels.each do |channel|
         uri = URI url
-        params[:channel] = channel
+        # params[:channel] = channel
         http_options = { use_ssl: uri.scheme == 'https' }
         http_options[:verify_mode] = OpenSSL::SSL::VERIFY_NONE unless RedmineMessenger.setting? :messenger_verify_ssl
         begin
           req = Net::HTTP::Post.new uri
-          req.set_form_data payload: params.to_json
+          req.body = params.to_json
+          req.content_type = 'application/json'
           Net::HTTP.start uri.hostname, uri.port, http_options do |http|
             response = http.request req
             Rails.logger.warn response.inspect unless [Net::HTTPSuccess, Net::HTTPRedirection, Net::HTTPOK].include? response
@@ -238,7 +240,7 @@ class Messenger
         attachment = Attachment.find_by id: detail.prop_key
         value = if attachment.present?
                   escape = false
-                  "<#{object_url attachment}|#{markup_format attachment.filename}>"
+                  "[#{markup_format attachment.filename}](#{object_url attachment})"
                 else
                   detail.prop_key.to_s
                 end
@@ -247,7 +249,7 @@ class Messenger
         issue = Issue.find_by id: detail.value
         value = if issue.present?
                   escape = false
-                  "<#{object_url issue}|#{markup_format issue}>"
+                  "[#{markup_format issue}](#{object_url issue})"
                 else
                   detail.value.to_s
                 end
